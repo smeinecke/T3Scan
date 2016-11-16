@@ -3,10 +3,22 @@
 chdir(dirname(__FILE__));
 
 //Configuration
+$input = 't3_fingerprints.ini';
 $output = 't3_fingerprints.php';
 
 $repo_host = 'http://sourceforge.net';
 $repo_index = '/projects/typo3/files/TYPO3%20Source%20and%20Dummy/';
+
+$printsByVersions = parse_ini_file($input, true);
+$files = array();
+foreach($printsByVersions as $ver=>$prints) {
+    foreach($prints as $p){
+        if(!isset($files[$p])){
+            $files[$p] = array();
+        }
+        $files[$p][] = $ver;
+    }
+}
 
 //Init
 $index = file_get_contents($repo_host.$repo_index) or die('No network...');
@@ -19,36 +31,42 @@ preg_match_all('#href="'.$repo_index.'([^"]+)/"\s*title="Click to enter#', $inde
 foreach($matches[1] as $release){
     list (, $ver) = explode(' ', urldecode($release));
     echo $ver.' : ';
-    
-    $downloadUrl = $repo_host.$repo_index.$release.'/typo3_src-'.$ver.'.tar.gz/download';
-    $tmpPath = '/tmp/t3src/typo3_src-'.$ver;
-    $downloadOut = $tmpPath.'.tar.gz';
-    exec('wget -O "'.$downloadOut.'"  "'.$downloadUrl.'"');
-    
-    if(file_exists($downloadOut)){
-        exec('cd '.dirname($tmpPath).' && tar -xzf "'.$downloadOut.'"');
-        $prints = staticFilesFingerprints($tmpPath);
-        if(!empty($prints)){
-            $ini = '['.$ver.']'."\n";
-            foreach($prints as $p){
-                $ini .= $p[1].' = "'.str_replace($tmpPath, '', $p[0]).'"'."\n";
-            }
-            $ini .= "\n";
-            file_put_contents($output, $ini, FILE_APPEND);
-        } else {
-            trigger_error('No fingerprints found for "'.$ver.'"');
-            file_put_contents('no-prints.log', $ver."\n", FILE_APPEND);
-        }
-        //exec('rm '.$downloadOut.' && rm -r '.$tmpDir);
-        unlink($downloadOut);
-    } else {
-        trigger_error('Can\'t download "'.$downloadUrl.'"');
+    if (!empty($printsByVersions[$ver])) {
+        continue;
     }
-    //http://typo3.org/extensions/repository/download/tt-news/3.2.0/zip/
+
+    $downloadUrl = $repo_host.$repo_index.$release.'/typo3_src-'.$ver.'.tar.gz/download';
+    $downloadOut = NULL;
+    $tmpPath = '/tmp/t3src/typo3_src-'.$ver;
+    if (!is_dir($tmpPath)) {
+        $downloadOut = $tmpPath.'.tar.gz';
+        exec('wget -O "'.$downloadOut.'"  "'.$downloadUrl.'"');
+
+        if(!file_exists($downloadOut)){
+            trigger_error('Can\'t download "'.$downloadUrl.'"');
+        }
+        exec('cd '.dirname($tmpPath).' && tar -xzf "'.$downloadOut.'"');
+    }
+    $prints = staticFilesFingerprints($tmpPath);
+    if(!empty($prints)){
+        echo count($prints) . " files\n";
+        $ini = '['.$ver.']'."\n";
+        foreach($prints as $p){
+            $ini .= $p[1].' = "'.str_replace($tmpPath, '', $p[0]).'"'."\n";
+        }
+        $ini .= "\n";
+        file_put_contents($input, $ini, FILE_APPEND);
+    } else {
+        trigger_error('No fingerprints found for "'.$ver.'"');
+        file_put_contents('no-prints.log', $ver."\n", FILE_APPEND);
+    }
+    if(!is_null($downloadOut) && file_exists($downloadOut)){
+        unlink($downloadOut);
+    }
 }
 
 //Index files > fingerprints > versions
-$printsByVersions = parse_ini_file($output, true);
+$printsByVersions = parse_ini_file($input, true);
 $files = array();
 foreach($printsByVersions as $ver=>$prints) {
     foreach($prints as $p){
@@ -71,9 +89,9 @@ function staticFilesFingerprints($scanDir, $maxDepth = 10){
         } else {
             //avoid hidden files
             if(strpos(basename($file), '.') === 0){
-                continue;   
+                continue;
             }
-            
+
             $fileType = strtolower(substr(strrchr($file,'.'),1));
             if(empty($fileType) || in_array($fileType, array('txt', 'css', 'js', 'html', 'htm', 'sql'))) {
                 $ret[] = array($file, md5_file($file));
